@@ -64,8 +64,8 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
-      ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+      // Allow JSON type for nested prompts and JSON parameters
+      types_stack[i].set_calc_type(ObJsonType);
     } else {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
     }
@@ -107,16 +107,41 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
       ObString arg_str;
       ObJsonString *arg_json_str = NULL;
       if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
+      } else if (datum->is_null()) {
+        ret = OB_ERR_INVALID_TYPE_FOR_OP;
       } else if (ob_is_string_tc(arg->datum_meta_.type_)) {
         arg_str = datum->get_string();
         if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
       } else if (ob_is_json(arg->datum_meta_.type_)) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
-      } else if (datum->is_null()) {
-        ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        ObIJsonBase *j_base = nullptr;
+        bool is_null = false;
+        if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator, i, j_base, is_null))) {
+        } else if (is_null || OB_ISNULL(j_base)) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (j_base->json_type() == ObJsonNodeType::J_OBJECT) {
+          ObJsonObject *j_obj = static_cast<ObJsonObject *>(j_base);
+          if (ObAIFuncPromptObjectUtils::is_valid_prompt_object(j_obj)) {
+            ObString resolved_str;
+            if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(tmp_allocator, j_obj, resolved_str))) {
+            } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, resolved_str, arg_json_str))) {
+            } else if (OB_FAIL(args_array->append(arg_json_str))) {
+            }
+          } else {
+            ObString raw_str;
+            if (OB_FAIL(j_obj->get_raw_binary(raw_str, &tmp_allocator))) {
+            } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
+            } else if (OB_FAIL(args_array->append(arg_json_str))) {
+            }
+          }
+        } else {
+          ObString raw_str;
+          if (OB_FAIL(j_base->get_raw_binary(raw_str, &tmp_allocator))) {
+          } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
+          } else if (OB_FAIL(args_array->append(arg_json_str))) {
+          }
+        }
       }
     }
   }
