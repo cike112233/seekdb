@@ -130,14 +130,14 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
             }
           } else {
             ObString raw_str;
-            if (OB_FAIL(j_obj->get_raw_binary(raw_str, &tmp_allocator))) {
+            if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(tmp_allocator, j_obj, raw_str))) {
             } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
             } else if (OB_FAIL(args_array->append(arg_json_str))) {
             }
           }
         } else {
           ObString raw_str;
-          if (OB_FAIL(j_base->get_raw_binary(raw_str, &tmp_allocator))) {
+          if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(tmp_allocator, j_base, raw_str))) {
           } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
           } else if (OB_FAIL(args_array->append(arg_json_str))) {
           }

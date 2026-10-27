@@ -1695,8 +1695,10 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
       } else if (OB_NOT_NULL(arg_node) && (arg_node->json_type() == ObJsonNodeType::J_OBJECT
                                        || arg_node->json_type() == ObJsonNodeType::J_ARRAY)) {
         ObString raw_str;
-        if (OB_FAIL(arg_node->get_raw_binary(raw_str, &allocator))) {
+        ObJsonBuffer j_buf(&allocator);
+        if (OB_FAIL(arg_node->print(j_buf, 0))) {
         } else {
+          raw_str = j_buf.string();
           max_result_len += raw_str.length();
         }
       } else {
@@ -1755,12 +1757,16 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
               } else if (OB_NOT_NULL(arg_node) && (arg_node->json_type() == ObJsonNodeType::J_OBJECT
                                               || arg_node->json_type() == ObJsonNodeType::J_ARRAY)) {
                 ObString arg_value;
-                if (OB_FAIL(arg_node->get_raw_binary(arg_value, &allocator))) {
-                } else if (result_pos + arg_value.length() <= max_result_len) {
-                  MEMCPY(result_buf + result_pos, arg_value.ptr(), arg_value.length());
-                  result_pos += arg_value.length();
+                ObJsonBuffer j_buf(&allocator);
+                if (OB_FAIL(arg_node->print(j_buf, 0))) {
                 } else {
-                  ret = OB_BUF_NOT_ENOUGH;
+                  arg_value = j_buf.string();
+                  if (result_pos + arg_value.length() <= max_result_len) {
+                    MEMCPY(result_buf + result_pos, arg_value.ptr(), arg_value.length());
+                    result_pos += arg_value.length();
+                  } else {
+                    ret = OB_BUF_NOT_ENOUGH;
+                  }
                 }
               } else {
                 //do nothing
