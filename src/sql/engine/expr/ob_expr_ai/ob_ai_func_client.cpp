@@ -211,7 +211,7 @@ int ObAIFuncClient::send_post(ObJsonObject *data, ObJsonObject *&response)
         break;
       } else {
         LOG_WARN("retryable http status code", K(http_code), K(i));
-        int64_t delay_ms = 1000 * (1 << i) + rand() % 1000;
+        int64_t delay_ms = 200 * (1 << i) + rand() % 200;
         ob_usleep(delay_ms * 1000);
         response_buf.reset();
       }
@@ -337,7 +337,7 @@ int ObAIFuncClient::send_post_batch(common::ObIAllocator &allocator,
         ret = OB_TIMEOUT;
       } else if (OB_CURL_ERROR == ret) {
         ret = OB_SUCCESS;
-        int64_t delay_ms = 1000 * (1 << i) + rand() % 1000;
+        int64_t delay_ms = 200 * (1 << i) + rand() % 200;
         ob_usleep(delay_ms * 1000);
       } else if (OB_SUCC(ret)) {
         break;
@@ -458,7 +458,7 @@ int ObAIFuncClient::init_easy_handle(CURL *curl, ObJsonObject *body, ObStringBuf
       LOG_WARN("set no signal failed", K(res), K(no_signal));
     } else if (CURLE_OK !=(res = curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, no_delay))) {
       LOG_WARN("set no delay failed", K(res), K(no_delay));
-    } else if (CURLE_OK !=(res = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000))) {
+    } else if (CURLE_OK !=(res = curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 2000))) {
       LOG_WARN("set connection timeout ms failed", K(res));
     } else if (CURLE_OK != (res = curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_sec_))) {
       LOG_WARN("set timeout failed", K(res), K(timeout_sec_));
