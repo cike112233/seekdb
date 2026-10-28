@@ -313,7 +313,6 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
     int64_t doc_count = document_array->element_count();
     ObArray<int64_t> doc_indices;
     ObArray<double> doc_scores;
-    ObArray<ObJsonNode *> score_nodes;
     for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
       ObJsonNode *model_result_node = model_result_array->get_value(i);
       if (OB_ISNULL(model_result_node) || model_result_node->json_type() != ObJsonNodeType::J_OBJECT) {
@@ -329,35 +328,31 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
           LOG_WARN("ai_rerank, result index out of range", K(ret), K(index), K(doc_count));
         } else if (OB_FAIL(doc_indices.push_back(index))) {
         } else if (OB_FAIL(doc_scores.push_back(score))) {
-        } else if (OB_FAIL(score_nodes.push_back(score_node))) {
         }
       }
     }
-    // Stable insertion sort, higher score first; equal scores keep the service order.
+    // Sort by score descending; equal scores fall back to the original document
+    // order so that the result is deterministic.
     for (int64_t i = 1; OB_SUCC(ret) && i < doc_indices.count(); i++) {
       int64_t cur_index = doc_indices[i];
       double cur_score = doc_scores[i];
-      ObJsonNode *cur_score_node = score_nodes[i];
       int64_t j = i - 1;
-      while (j >= 0 && doc_scores[j] < cur_score) {
+      while (j >= 0 && (doc_scores[j] < cur_score
+                        || (doc_scores[j] == cur_score && doc_indices[j] > cur_index))) {
         doc_indices[j + 1] = doc_indices[j];
         doc_scores[j + 1] = doc_scores[j];
-        score_nodes[j + 1] = score_nodes[j];
         --j;
       }
       doc_indices[j + 1] = cur_index;
       doc_scores[j + 1] = cur_score;
-      score_nodes[j + 1] = cur_score_node;
     }
+    // Return the original documents, ordered by relevance. Returning the original
+    // json nodes keeps the document untouched; the score is not part of the result.
     for (int64_t i = 0; OB_SUCC(ret) && i < doc_indices.count(); i++) {
-      ObJsonObject *origin_obj = nullptr;
-      ObJsonObject *new_obj = nullptr;
-      if (OB_ISNULL(origin_obj = static_cast<ObJsonObject *>(document_array->get_value(doc_indices[i])))) {
+      ObJsonNode *origin_node = document_array->get_value(doc_indices[i]);
+      if (OB_ISNULL(origin_node)) {
         ret = OB_ERR_UNEXPECTED;
-      } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (OB_NOT_NULL(score_nodes[i]) && OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_nodes[i]))) {
-      } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
+      } else if (OB_FAIL(sorted_document_array_obj->append(origin_node))) {
       }
     }
   }
