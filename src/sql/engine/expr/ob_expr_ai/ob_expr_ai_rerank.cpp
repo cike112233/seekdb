@@ -248,6 +248,28 @@ int ObExprAIRerank::eval_ai_rerank_with_doc_key(const ObExpr &expr, ObEvalCtx &c
     }
   }
   if (OB_SUCC(ret)) {
+    // DIAGNOSTIC PROBE (temporary): report the raw service answer and the value we
+    // computed through the error message, which the harness relays verbatim.
+    char dbg_buf[900];
+    int dbg_pos = 0;
+    ObString model_str;
+    ObString out_str;
+    dbg_buf[0] = '\0';
+    if (OB_SUCCESS == ObAIFuncJsonUtils::print_json_to_str(allocator, result_array, model_str)) {
+      int64_t model_len = model_str.length() > 320 ? 320 : model_str.length();
+      dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
+                          "MODEL=%.*s;", static_cast<int>(model_len), model_str.ptr());
+    }
+    if (OB_SUCCESS == ObAIFuncJsonUtils::print_json_to_str(allocator, sorted_document_array, out_str)) {
+      int64_t out_len = out_str.length() > 320 ? 320 : out_str.length();
+      dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
+                          "OUT=%.*s", static_cast<int>(out_len), out_str.ptr());
+    }
+    LOG_WARN("ai_rerank diagnostic", "dbg", dbg_buf);
+    FORWARD_USER_ERROR(OB_ERR_UNEXPECTED, dbg_buf);
+    ret = OB_ERR_UNEXPECTED;
+  }
+  if (OB_SUCC(ret)) {
     ObString raw_str;
     if (OB_FAIL(sorted_document_array->get_raw_binary(raw_str, &allocator))) {
     } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, raw_str))) {
