@@ -403,26 +403,6 @@ int ObExprAIRerank::inner_eval_ai_rerank(ObIAllocator &allocator,
     ret = OB_ERR_UNEXPECTED;
   } else {
     result_array = res;
-    // DIAGNOSTIC PROBE (temporary): report the exact rerank request and answer
-    // through the error message, which the harness relays verbatim.
-    char dbg_buf[1000];
-    int dbg_pos = 0;
-    ObString req_str;
-    ObString resp_str;
-    dbg_buf[0] = '\0';
-    if (OB_SUCCESS == ObAIFuncJsonUtils::print_json_to_str(allocator, body, req_str)) {
-      int64_t req_len = req_str.length() > 380 ? 380 : req_str.length();
-      dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
-                          "REQ=%.*s;", static_cast<int>(req_len), req_str.ptr());
-    }
-    if (OB_SUCCESS == ObAIFuncJsonUtils::print_json_to_str(allocator, http_response, resp_str)) {
-      int64_t resp_len = resp_str.length() > 520 ? 520 : resp_str.length();
-      dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
-                          "RESP=%.*s", static_cast<int>(resp_len), resp_str.ptr());
-    }
-    LOG_WARN("ai_rerank diagnostic", "dbg", dbg_buf);
-    FORWARD_USER_ERROR(OB_ERR_UNEXPECTED, dbg_buf);
-    ret = OB_ERR_UNEXPECTED;
   }
   return ret;
 }

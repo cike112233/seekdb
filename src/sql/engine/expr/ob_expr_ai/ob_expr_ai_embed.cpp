@@ -142,6 +142,19 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
         ObString result;
         if (OB_FAIL(model.call_dense_embedding(content, config, result))) {
         } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+        } else if (ob_is_text_tc(content_expr->datum_meta_.type_)) {
+          // DIAGNOSTIC PROBE (temporary): report the LOB input this row produced
+          // and the embedding computed for it through the error message.
+          char dbg_buf[900];
+          int64_t in_len = content.length() > 100 ? 100 : content.length();
+          int64_t out_len = result.length() > 320 ? 320 : result.length();
+          snprintf(dbg_buf, sizeof(dbg_buf), "IN=[%.*s] OUTLEN=%d OUT=[%.*s]",
+                   static_cast<int>(in_len), content.ptr(),
+                   static_cast<int>(result.length()),
+                   static_cast<int>(out_len), result.ptr());
+          LOG_WARN("ai_embed diagnostic", "dbg", dbg_buf);
+          FORWARD_USER_ERROR(OB_ERR_UNEXPECTED, dbg_buf);
+          ret = OB_ERR_UNEXPECTED;
         }
       }
     }
