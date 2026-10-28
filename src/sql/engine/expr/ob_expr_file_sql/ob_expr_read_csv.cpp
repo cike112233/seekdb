@@ -200,6 +200,70 @@ static int json_escape_append(ObStringBuffer &buf, const char *str, int64_t len)
   return ret;
 }
 
+// Type inference for CSV values
+enum CsvColType {
+  CSV_TYPE_NULL = 0,
+  CSV_TYPE_BOOL = 1,
+  CSV_TYPE_INT = 2,
+  CSV_TYPE_FLOAT = 3,
+  CSV_TYPE_STRING = 4,
+};
+
+static CsvColType infer_value_type(const ObString &val)
+{
+  if (val.length() == 0) return CSV_TYPE_NULL;
+
+  const char *p = val.ptr();
+  int64_t len = val.length();
+
+  // Check boolean
+  if ((len == 4 && strncasecmp(p, "true", 4) == 0) ||
+      (len == 5 && strncasecmp(p, "false", 5) == 0)) {
+    return CSV_TYPE_BOOL;
+  }
+
+  // Check integer (optional sign, then digits)
+  bool is_int = true;
+  bool is_float = true;
+  bool has_dot = false;
+  bool has_e = false;
+  int64_t start = 0;
+
+  if (p[0] == '-' || p[0] == '+') start = 1;
+  if (start >= len) return CSV_TYPE_STRING;
+
+  for (int64_t i = start; i < len; i++) {
+    char c = p[i];
+    if (c >= '0' && c <= '9') {
+      // digit - OK for both int and float
+    } else if (c == '.' && !has_dot && !has_e) {
+      has_dot = true;
+      is_int = false;
+    } else if ((c == 'e' || c == 'E') && !has_e && i > start) {
+      has_e = true;
+      is_int = false;
+      if (i + 1 < len && (p[i+1] == '+' || p[i+1] == '-')) i++;
+    } else {
+      is_int = false;
+      is_float = false;
+      break;
+    }
+  }
+
+  if (is_int && start < len) return CSV_TYPE_INT;
+  if (is_float && has_dot && start < len) return CSV_TYPE_FLOAT;
+  if (is_float && has_e && start < len) return CSV_TYPE_FLOAT;
+
+  return CSV_TYPE_STRING;
+}
+
+// Widen type: NULL < BOOL < INT < FLOAT < STRING
+static CsvColType widen_type(CsvColType a, CsvColType b)
+{
+  if (a > b) return a;
+  return b;
+}
+
 int ObExprReadCSV::eval_read_csv(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
 {
   INIT_SUCC(ret);
@@ -334,53 +398,93 @@ int ObExprReadCSV::eval_read_csv(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
               }
 
               if (OB_SUCC(ret)) {
-                // Generate JSON array
-                json_buf.append("[");
+                // First pass: parse all rows and infer column types
+                int64_t data_row_count = static_cast<int64_t>(lines.count()) - header_idx;
+                int64_t max_cols = 0;
+
+                // Store parsed rows
+                ObSEArray<ObSEArray<ObString, 32>, 64> all_rows;
 
                 for (int64_t i = header_idx; i < static_cast<int64_t>(lines.count()) && OB_SUCC(ret); i++) {
                   ObSEArray<ObString, 32> fields;
                   if (OB_FAIL(parse_csv_fields(temp_allocator, lines[i].ptr(), lines[i].length(), fields))) {
                     LOG_WARN("failed to parse row", K(ret), K(i));
                   } else {
-                    if (i > header_idx) {
-                      json_buf.append(",");
+                    if (static_cast<int64_t>(fields.count()) > max_cols) {
+                      max_cols = static_cast<int64_t>(fields.count());
                     }
+                    all_rows.push_back(fields);
+                  }
+                }
+
+                if (OB_SUCC(ret) && max_cols > 0) {
+                  // Compute column types
+                  ObSEArray<CsvColType, 32> col_types;
+                  for (int64_t j = 0; j < max_cols; j++) {
+                    col_types.push_back(CSV_TYPE_NULL);
+                  }
+
+                  for (int64_t i = 0; i < static_cast<int64_t>(all_rows.count()); i++) {
+                    for (int64_t j = 0; j < static_cast<int64_t>(all_rows[i].count()) && j < max_cols; j++) {
+                      CsvColType vt = infer_value_type(all_rows[i][j]);
+                      col_types[j] = widen_type(col_types[j], vt);
+                    }
+                  }
+
+                  // Generate JSON array with typed values
+                  json_buf.append("[");
+
+                  for (int64_t i = 0; i < static_cast<int64_t>(all_rows.count()) && OB_SUCC(ret); i++) {
+                    if (i > 0) json_buf.append(",");
                     json_buf.append("{");
 
-                    for (int64_t j = 0; j < static_cast<int64_t>(fields.count()) && OB_SUCC(ret); j++) {
-                      if (j > 0) {
-                        json_buf.append(",");
-                      }
+                    for (int64_t j = 0; j < static_cast<int64_t>(all_rows[i].count()) && OB_SUCC(ret); j++) {
+                      if (j > 0) json_buf.append(",");
 
                       // Key
                       json_buf.append("\"");
                       if (j < static_cast<int64_t>(headers.count())) {
                         json_escape_append(json_buf, headers[j].ptr(), headers[j].length());
                       } else {
-                        // Auto-generate column name
                         char col_name[32];
                         snprintf(col_name, sizeof(col_name), "column%ld", j + 1);
                         json_buf.append(col_name);
                       }
                       json_buf.append("\":");
 
-                      // Value
-                      if (fields[j].length() == 0) {
+                      // Value with type-aware output
+                      CsvColType col_type = (j < static_cast<int64_t>(col_types.count())) ?
+                                            col_types[j] : CSV_TYPE_STRING;
+                      const ObString &val = all_rows[i][j];
+
+                      if (val.length() == 0 || col_type == CSV_TYPE_NULL) {
                         json_buf.append("null");
+                      } else if (col_type == CSV_TYPE_BOOL) {
+                        if (val.length() == 4 && strncasecmp(val.ptr(), "true", 4) == 0) {
+                          json_buf.append("true");
+                        } else {
+                          json_buf.append("false");
+                        }
+                      } else if (col_type == CSV_TYPE_INT || col_type == CSV_TYPE_FLOAT) {
+                        // Output number without quotes
+                        json_buf.append(val.ptr(), val.length());
                       } else {
+                        // String - output with quotes and escaping
                         json_buf.append("\"");
-                        json_escape_append(json_buf, fields[j].ptr(), fields[j].length());
+                        json_escape_append(json_buf, val.ptr(), val.length());
                         json_buf.append("\"");
                       }
                     }
 
                     json_buf.append("}");
                   }
+
+                  json_buf.append("]");
+                } else if (OB_SUCC(ret)) {
+                  json_buf.append("[]");
                 }
 
-                json_buf.append("]");
-
-                if (OB_SUCC(ret)) {
+                if (OB_SUCC(ret) && json_buf.length() > 0) {
                   ObString result = json_buf.string();
                   if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
                     LOG_WARN("failed to set result", K(ret));
