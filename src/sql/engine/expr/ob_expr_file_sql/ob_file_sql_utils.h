@@ -1,19 +1,3 @@
-/*
- * Copyright (c) 2025 OceanBase.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #pragma once
 
 #include "lib/oblog/ob_log_module.h"
@@ -26,6 +10,8 @@ namespace oceanbase
 namespace sql
 {
 
+class ObEvalCtx;
+
 class ObFileSQLUtils
 {
 public:
@@ -33,6 +19,11 @@ public:
                                const common::ObString &file_path,
                                const common::ObString &secure_file_priv,
                                bool enable_file_sql);
+
+  // Session-aware version: gets secure_file_priv from session
+  static int check_file_access_with_session(common::ObIAllocator &allocator,
+                                            const common::ObString &file_path,
+                                            const ObEvalCtx &ctx);
 
   static int glob_files(common::ObIAllocator &allocator,
                         const common::ObString &pattern,

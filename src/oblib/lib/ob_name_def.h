@@ -1095,4 +1095,5 @@
 #define N_READ_JSON                         "read_json"
 #define N_READ_PARQUET                      "read_parquet"
 #define N_GLOB                              "glob"
+#define N_WRITE_CSV                         "write_csv"
 #endif //OCEANBASE_LIB_OB_NAME_DEF_H_
