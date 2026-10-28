@@ -54,13 +54,19 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
   ObExprResType template_type = types_stack[0];
   if (!ob_is_string_type(template_type.get_type())) {
     ret = OB_ERR_INVALID_TYPE_FOR_OP;
+  } else if (ob_is_text_tc(template_type.get_type())) {
+    // LOB template: keep the LOB type, eval reads the real value through
+    // ObTextStringHelper::read_real_string_data().  Casting it to varchar would
+    // lose the lob header and only leave a locator behind.
   } else {
     types_stack[0].set_calc_type(ObVarcharType);
     types_stack[0].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
   }
 
   for (int64_t i = 1; i < param_num && OB_SUCC(ret); i++) {
-    if (ob_is_string_type(types_stack[i].get_type())) {
+    if (ob_is_text_tc(types_stack[i].get_type())) {
+      // LOB parameter: keep the LOB type, see the template branch above.
+    } else if (ob_is_string_tc(types_stack[i].get_type())) {
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
@@ -74,6 +80,24 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
   if (OB_SUCC(ret)) {
     type.set_json();
     type.set_length((ObAccuracy::DDL_DEFAULT_ACCURACY[ObJsonType]).get_length());
+  }
+  return ret;
+}
+
+// Append a JSON argument as a JSON value instead of a serialized string, so that
+// ai_prompt keeps the structure of JSON arguments.  The node is deep copied because
+// it may belong to another JSON document with a different lifetime.
+static int append_json_arg(ObIAllocator &allocator, ObIJsonBase *json_node, ObJsonArray *args_array)
+{
+  int ret = OB_SUCCESS;
+  ObJsonNode *cloned_node = NULL;
+  if (OB_ISNULL(json_node) || OB_ISNULL(args_array)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_ISNULL(cloned_node = static_cast<ObJsonNode *>(json_node)->clone(&allocator, true))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("failed to clone json node", K(ret));
+  } else if (OB_FAIL(args_array->append(cloned_node))) {
+    LOG_WARN("failed to append json node", K(ret));
   }
   return ret;
 }
@@ -128,27 +152,17 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator, i, j_base, is_null))) {
         } else if (is_null || OB_ISNULL(j_base)) {
           ret = OB_ERR_INVALID_TYPE_FOR_OP;
-        } else if (j_base->json_type() == ObJsonNodeType::J_OBJECT) {
-          ObJsonObject *j_obj = static_cast<ObJsonObject *>(j_base);
-          if (ObAIFuncPromptObjectUtils::is_valid_prompt_object(j_obj)) {
-            ObString resolved_str;
-            if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(tmp_allocator, j_obj, resolved_str))) {
-            } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, resolved_str, arg_json_str))) {
-            } else if (OB_FAIL(args_array->append(arg_json_str))) {
-            }
-          } else {
-            ObString raw_str;
-            if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(tmp_allocator, j_obj, raw_str))) {
-            } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
-            } else if (OB_FAIL(args_array->append(arg_json_str))) {
-            }
-          }
-        } else {
-          ObString raw_str;
-          if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(tmp_allocator, j_base, raw_str))) {
-          } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, raw_str, arg_json_str))) {
+        } else if (j_base->json_type() == ObJsonNodeType::J_OBJECT
+                   && ObAIFuncPromptObjectUtils::is_valid_prompt_object(static_cast<ObJsonObject *>(j_base))) {
+          // A nested prompt object: substitute its placeholders and pass the
+          // resolved prompt as plain text so it can be used as a template argument.
+          ObString resolved_str;
+          if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(
+                  tmp_allocator, static_cast<ObJsonObject *>(j_base), resolved_str))) {
+          } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, resolved_str, arg_json_str))) {
           } else if (OB_FAIL(args_array->append(arg_json_str))) {
           }
+        } else if (OB_FAIL(append_json_arg(tmp_allocator, j_base, args_array))) {
         }
       }
     }
