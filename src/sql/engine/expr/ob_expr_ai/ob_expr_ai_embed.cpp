@@ -55,8 +55,13 @@ int ObExprAIEmbed::calc_result_typeN(ObExprResType &type,
   } else {
     types_stack[MODEL_IDX].set_calc_type(ObVarcharType);
     types_stack[MODEL_IDX].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
-    types_stack[CONTENT_IDX].set_calc_type(ObVarcharType);
-    types_stack[CONTENT_IDX].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
+    if (ob_is_text_tc(types_stack[CONTENT_IDX].get_type())) {
+      // LOB input: keep the LOB type, eval reads the real value through
+      // ObTextStringHelper::read_real_string_data().
+    } else {
+      types_stack[CONTENT_IDX].set_calc_type(ObVarcharType);
+      types_stack[CONTENT_IDX].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
+    }
     if (param_num == 3) {
       if (ob_is_integer_type(types_stack[DIM_IDX].get_type())) {
         types_stack[DIM_IDX].set_calc_type(ObIntType);
@@ -83,12 +88,10 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
   if (expr.arg_cnt_ == 3 ? OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content, arg_dim))
                          : OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content))) {
   } else if (arg_model_id->is_null() || arg_content->is_null()) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or content is null");
     res.set_null();
   } else {
     ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
-    
+
     MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator());
     lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr(N_AI_EMBED));
     ObAIFuncExprInfo *info = nullptr;
@@ -97,38 +100,49 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
     query::ObIAiEndpointResolver *endpoint_resolver =
         ::oceanbase::share::server_service<::oceanbase::query::ObIAiEndpointResolver>();
     ObString model_id = arg_model_id->get_string();
-    ObString content = arg_content->get_string();
-    if (model_id.empty() || content.empty()) {
-      ret = OB_INVALID_ARGUMENT;
-      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or input is empty");
-      res.set_null();
-    }
-    int64_t dim = 0;
-    ObJsonInt *dim_json = nullptr;
-    ObJsonObject *config = nullptr;
+    ObString content;
+    ObExpr *content_expr = expr.args_[CONTENT_IDX];
     if (OB_FAIL(ret)) {
-    } else if (OB_NOT_NULL(arg_dim)) {
-      dim = arg_dim->get_int();
-      if (dim <= 0) {
-        ret = OB_INVALID_ARGUMENT;
-        LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, dimension parameter must be a positive integer");
-        res.set_null();
-      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
-      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(temp_allocator, dim, dim_json))) {
-      } else if (OB_FAIL(config->add("dimensions", dim_json))) {
-      }
-    }
-    if (OB_FAIL(ret)) {
-    } else if (OB_FAIL(ObAIFuncUtils::get_ai_func_info(temp_allocator, model_id, info))) {
-    } else if (OB_ISNULL(endpoint_resolver)) {
+    } else if (OB_ISNULL(content_expr)) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(endpoint_resolver->resolve_by_model_name(
-                   model_id, temp_allocator, resolved_endpoint))) {
+    } else if (ob_is_text_tc(content_expr->datum_meta_.type_)) {
+      if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, temp_allocator, *arg_content,
+              content_expr->datum_meta_, content_expr->obj_meta_.has_lob_header(), content))) {
+      }
     } else {
-      ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
-      ObString result;
-      if (OB_FAIL(model.call_dense_embedding(content, config, result))) {
-      } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+      content = arg_content->get_string();
+    }
+    if (OB_FAIL(ret)) {
+    } else if (model_id.empty() || content.empty()) {
+      res.set_null();
+    } else {
+      int64_t dim = 0;
+      ObJsonInt *dim_json = nullptr;
+      ObJsonObject *config = nullptr;
+      if (OB_FAIL(ret)) {
+      } else if (OB_NOT_NULL(arg_dim) && !arg_dim->is_null()) {
+        dim = arg_dim->get_int();
+        if (dim <= 0) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, dimension parameter must be a positive integer");
+          res.set_null();
+        } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
+        } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(temp_allocator, dim, dim_json))) {
+        } else if (OB_FAIL(config->add("dimensions", dim_json))) {
+        }
+      }
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(ObAIFuncUtils::get_ai_func_info(temp_allocator, model_id, info))) {
+      } else if (OB_ISNULL(endpoint_resolver)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(endpoint_resolver->resolve_by_model_name(
+                     model_id, temp_allocator, resolved_endpoint))) {
+      } else {
+        ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
+        ObString result;
+        if (OB_FAIL(model.call_dense_embedding(content, config, result))) {
+        } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+        }
       }
     }
   }
