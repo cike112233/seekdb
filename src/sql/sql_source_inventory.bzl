@@ -567,6 +567,7 @@ SQL_UNITY_GROUPS = [
             "src/sql/engine/expr/ob_expr_file_sql/ob_expr_read_json.cpp",
             "src/sql/engine/expr/ob_expr_file_sql/ob_expr_read_parquet.cpp",
             "src/sql/engine/expr/ob_expr_file_sql/ob_expr_glob.cpp",
+            "src/sql/engine/expr/ob_expr_file_sql/ob_expr_write_csv.cpp",
         ],
     ),
     struct(

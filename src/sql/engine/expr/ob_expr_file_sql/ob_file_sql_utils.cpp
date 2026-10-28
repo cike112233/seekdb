@@ -1,23 +1,9 @@
-/*
- * Copyright (c) 2025 OceanBase.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_file_sql_utils.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "lib/file/ob_file.h"
+#include "sql/session/ob_sql_session_info.h"
+#include "sql/engine/expr/ob_eval_info.h"
 #include <glob.h>
 
 using namespace oceanbase::common;
@@ -33,6 +19,7 @@ int ObFileSQLUtils::check_file_access(ObIAllocator &allocator,
                                       bool enable_file_sql)
 {
   int ret = OB_SUCCESS;
+  UNUSED(allocator);
 
   if (!enable_file_sql) {
     ret = OB_NOT_SUPPORTED;
@@ -55,14 +42,22 @@ int ObFileSQLUtils::check_file_access(ObIAllocator &allocator,
   return ret;
 }
 
+int ObFileSQLUtils::check_file_access_with_session(ObIAllocator &allocator,
+                                                    const ObString &file_path,
+                                                    const ObEvalCtx &ctx)
+{
+  ObString secure_file_priv;
+  ObSQLSessionInfo *session = ctx.exec_ctx_.get_my_session();
+  if (OB_NOT_NULL(session)) {
+    session->get_secure_file_priv(secure_file_priv);
+  }
+  return check_file_access(allocator, file_path, secure_file_priv, true);
+}
+
 bool ObFileSQLUtils::is_safe_path(const ObString &path)
 {
   // Check for path traversal attempts
   if (path.find("..") != OB_INVALID_INDEX) {
-    return false;
-  }
-  // Check for absolute path on Windows
-  if (path.length() >= 2 && path[1] == ':') {
     return false;
   }
   return true;
@@ -72,7 +67,7 @@ ObString ObFileSQLUtils::get_file_extension(const ObString &filename)
 {
   int64_t dot_pos = filename.rfind('.');
   if (dot_pos != OB_INVALID_INDEX && dot_pos < filename.length() - 1) {
-    return ObString(filename.ptr() + dot_pos + 1, filename.length() - dot_pos - 1);
+    return ObString(filename.ptr() + dot_pos + 1, static_cast<int32_t>(filename.length() - dot_pos - 1));
   }
   return ObString();
 }
@@ -102,7 +97,7 @@ int ObFileSQLUtils::glob_files(ObIAllocator &allocator,
           break;
         }
         MEMCPY(path_copy, glob_result.gl_pathv[i], path_len);
-        ObString file_path(path_len, path_copy);
+        ObString file_path(static_cast<int32_t>(path_len), path_copy);
         if (OB_FAIL(file_list.push_back(file_path))) {
           break;
         }

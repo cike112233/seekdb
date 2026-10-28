@@ -422,6 +422,7 @@
 #include "sql/engine/expr/ob_expr_file_sql/ob_expr_read_json.h"
 #include "sql/engine/expr/ob_expr_file_sql/ob_expr_read_parquet.h"
 #include "sql/engine/expr/ob_expr_file_sql/ob_expr_glob.h"
+#include "sql/engine/expr/ob_expr_file_sql/ob_expr_write_csv.h"
 #include "sql/engine/expr/ob_expr_vector_similarity.h"
 #include "sql/engine/expr/ob_expr_lock_func.h"
 
@@ -1056,6 +1057,7 @@ void ObExprOperatorFactory::register_expr_operators()
     REG_OP(ObExprReadJSON);
     REG_OP(ObExprReadParquet);
     REG_OP(ObExprGlob);
+    REG_OP(ObExprWriteCSV);
   }();
 }
 

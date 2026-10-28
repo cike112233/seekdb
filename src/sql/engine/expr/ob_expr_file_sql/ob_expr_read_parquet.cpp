@@ -140,7 +140,7 @@ int ObExprReadParquet::eval_read_parquet(const ObExpr &expr, ObEvalCtx &ctx, ObD
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "read_parquet, file path is empty");
       res.set_null();
-    } else if (OB_FAIL(ObFileSQLUtils::check_file_access(temp_allocator, file_path, ObString(""), true))) {
+    } else if (OB_FAIL(ObFileSQLUtils::check_file_access_with_session(temp_allocator, file_path, ctx))) {
       LOG_WARN("file access check failed", K(ret));
       res.set_null();
     } else {

@@ -67,7 +67,7 @@ int ObExprGlob::eval_glob(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "glob, pattern is empty");
       res.set_null();
-    } else if (OB_FAIL(ObFileSQLUtils::check_file_access(temp_allocator, pattern, ObString(""), true))) {
+    } else if (OB_FAIL(ObFileSQLUtils::check_file_access_with_session(temp_allocator, pattern, ctx))) {
       LOG_WARN("file access check failed", K(ret));
       res.set_null();
     } else {
