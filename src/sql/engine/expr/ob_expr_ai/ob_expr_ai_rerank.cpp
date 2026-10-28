@@ -306,34 +306,58 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
   ObJsonArray *sorted_document_array_obj = nullptr;
   if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator, sorted_document_array_obj))) {
   } else {
+    // Collect (document index, score) first: the service result order is not
+    // guaranteed, the ordering of the returned documents has to be decided here.
+    // index/relevance_score are optional, so fall back to the position and to 0.
     int64_t count = model_result_array->element_count();
+    int64_t doc_count = document_array->element_count();
+    ObArray<int64_t> doc_indices;
+    ObArray<double> doc_scores;
+    ObArray<ObJsonNode *> score_nodes;
     for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
       ObJsonNode *model_result_node = model_result_array->get_value(i);
       if (OB_ISNULL(model_result_node) || model_result_node->json_type() != ObJsonNodeType::J_OBJECT) {
         ret = OB_ERR_UNEXPECTED;
       } else {
         ObJsonObject *model_result_obj = static_cast<ObJsonObject *>(model_result_node);
-        // Do not assume the concrete json type of the numeric fields: the score may be
-        // returned as an integer, and the score itself is optional for the result.
-        ObJsonNode *index_value = model_result_obj->get_value(INDEX_KEY);
-        ObJsonNode *score_value = model_result_obj->get_value(SCORE_KEY);
-        if (OB_ISNULL(index_value) || index_value->json_type() != ObJsonNodeType::J_INT) {
+        ObJsonNode *index_node = model_result_obj->get_value(INDEX_KEY);
+        ObJsonNode *score_node = model_result_obj->get_value(SCORE_KEY);
+        int64_t index = OB_ISNULL(index_node) ? i : index_node->get_int();
+        double score = OB_ISNULL(score_node) ? 0.0 : score_node->get_double();
+        if (OB_UNLIKELY(index < 0 || index >= doc_count)) {
           ret = OB_ERR_UNEXPECTED;
-        } else {
-          int64_t index = index_value->get_int();
-          ObJsonObject *origin_obj = nullptr;
-          ObJsonObject *new_obj = nullptr;
-          if (OB_UNLIKELY(index < 0 || index >= document_array->element_count())) {
-            ret = OB_ERR_UNEXPECTED;
-            LOG_WARN("ai_rerank, result index out of range", K(ret), K(index), K(document_array->element_count()));
-          } else if (OB_ISNULL(origin_obj = static_cast<ObJsonObject *>(document_array->get_value(index)))) {
-            ret = OB_ERR_UNEXPECTED;
-          } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
-            ret = OB_ERR_UNEXPECTED;
-          } else if (OB_NOT_NULL(score_value) && OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_value))) {
-          } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
-          }
+          LOG_WARN("ai_rerank, result index out of range", K(ret), K(index), K(doc_count));
+        } else if (OB_FAIL(doc_indices.push_back(index))) {
+        } else if (OB_FAIL(doc_scores.push_back(score))) {
+        } else if (OB_FAIL(score_nodes.push_back(score_node))) {
         }
+      }
+    }
+    // Stable insertion sort, higher score first; equal scores keep the service order.
+    for (int64_t i = 1; OB_SUCC(ret) && i < doc_indices.count(); i++) {
+      int64_t cur_index = doc_indices[i];
+      double cur_score = doc_scores[i];
+      ObJsonNode *cur_score_node = score_nodes[i];
+      int64_t j = i - 1;
+      while (j >= 0 && doc_scores[j] < cur_score) {
+        doc_indices[j + 1] = doc_indices[j];
+        doc_scores[j + 1] = doc_scores[j];
+        score_nodes[j + 1] = score_nodes[j];
+        --j;
+      }
+      doc_indices[j + 1] = cur_index;
+      doc_scores[j + 1] = cur_score;
+      score_nodes[j + 1] = cur_score_node;
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < doc_indices.count(); i++) {
+      ObJsonObject *origin_obj = nullptr;
+      ObJsonObject *new_obj = nullptr;
+      if (OB_ISNULL(origin_obj = static_cast<ObJsonObject *>(document_array->get_value(doc_indices[i])))) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_NOT_NULL(score_nodes[i]) && OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_nodes[i]))) {
+      } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
       }
     }
   }
@@ -398,10 +422,9 @@ int ObExprAIRerank::batch_result_add_base(ObIAllocator &allocator, ObJsonArray *
     if (OB_ISNULL(obj)) {
       ret = OB_ERR_UNEXPECTED;
     } else {
+      // index is optional; when present it has to be rebased to the original array.
       ObJsonNode *index_node = obj->get_value(index_key);
-      if (OB_ISNULL(index_node) || index_node->json_type() != ObJsonNodeType::J_INT) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
+      if (OB_NOT_NULL(index_node) && index_node->json_type() == ObJsonNodeType::J_INT) {
         int64_t id = index_node->get_int() + start_idx;
         static_cast<ObJsonInt *>(index_node)->set_value(id);
       }

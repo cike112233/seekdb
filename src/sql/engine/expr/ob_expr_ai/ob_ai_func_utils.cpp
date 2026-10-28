@@ -354,16 +354,27 @@ int ObOllamaUtils::ObOllamaComplete::parse_output(common::ObIAllocator &allocato
   if (OB_ISNULL(http_response)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
+    // The native "/api/generate" answer carries a top level "response"; the chat
+    // style answer carries "message.content" instead.  Try the native one first.
     ObIJsonBase *j_tree = http_response;
     common::ObString path_text("$.response");
     ObJsonPath j_path(path_text, &allocator);
     ObJsonSeekResult hit;
     if (OB_FAIL(j_path.parse_path())) {
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
-    } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
-    } else {
+    } else if (hit.size() > 0) {
       result = hit[0];
+    } else {
+      common::ObString msg_path_text("$.message.content");
+      ObJsonPath msg_path(msg_path_text, &allocator);
+      ObJsonSeekResult msg_hit;
+      if (OB_FAIL(msg_path.parse_path())) {
+      } else if (OB_FAIL(j_tree->seek(msg_path, msg_path.path_node_cnt(), false, false, msg_hit))) {
+      } else if (msg_hit.size() == 0) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        result = msg_hit[0];
+      }
     }
   }
   return ret;
@@ -413,16 +424,27 @@ int ObOllamaUtils::ObOllamaEmbed::parse_output(common::ObIAllocator &allocator,
   if (OB_ISNULL(http_response)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
+    // "/api/embed" answers with "embeddings" (a list of vectors), the older
+    // "/api/embeddings" answers with a single "embedding" vector.
     ObIJsonBase *j_tree = http_response;
     common::ObString path_text("$.embeddings");
     ObJsonPath j_path(path_text, &allocator);
     ObJsonSeekResult hit;
     if (OB_FAIL(j_path.parse_path())) {
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
-    } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
-    } else {
+    } else if (hit.size() > 0) {
       result = hit[0];
+    } else {
+      common::ObString single_path_text("$.embedding");
+      ObJsonPath single_path(single_path_text, &allocator);
+      ObJsonSeekResult single_hit;
+      if (OB_FAIL(single_path.parse_path())) {
+      } else if (OB_FAIL(j_tree->seek(single_path, single_path.path_node_cnt(), false, false, single_hit))) {
+      } else if (single_hit.size() == 0) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        result = single_hit[0];
+      }
     }
   }
   return ret;
