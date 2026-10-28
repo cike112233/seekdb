@@ -171,17 +171,8 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(ObAIFuncPromptObjectUtils::construct_prompt_object(tmp_allocator, template_str, args_array, prompt_object))) {
   } else {
-    // DIAGNOSTIC PROBE (temporary): answer with a fixed prompt object built through
-    // the normal path, so the first statement of the test mismatches instead of
-    // failing. This reveals whether the reported failure text is a live diff.
-    ObString probe_template("PROBE");
-    ObJsonArray *probe_args = NULL;
-    ObJsonObject *probe_object = NULL;
     ObString raw_str;
-    if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(tmp_allocator, probe_args))) {
-    } else if (OB_FAIL(ObAIFuncPromptObjectUtils::construct_prompt_object(
-                       tmp_allocator, probe_template, probe_args, probe_object))) {
-    } else if (OB_FAIL(probe_object->get_raw_binary(raw_str, &tmp_allocator))) {
+    if (OB_FAIL(prompt_object->get_raw_binary(raw_str, &tmp_allocator))) {
     } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, raw_str))) {
     }
   }
