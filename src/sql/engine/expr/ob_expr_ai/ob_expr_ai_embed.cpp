@@ -103,7 +103,7 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
       ObJsonInt *dim_json = nullptr;
       ObJsonObject *config = nullptr;
       if (OB_FAIL(ret)) {
-      } else if (OB_NOT_NULL(arg_dim)) {
+      } else if (OB_NOT_NULL(arg_dim) && !arg_dim->is_null()) {
         dim = arg_dim->get_int();
         if (dim <= 0) {
           ret = OB_INVALID_ARGUMENT;
