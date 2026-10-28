@@ -2,7 +2,7 @@
 #include "ob_file_sql_utils.h"
 #include "lib/utility/ob_macro_utils.h"
 #include "lib/file/ob_file.h"
-#include "sql/session/ob_sql_session_info.h"
+#include "sql/session/ob_basic_session_info.h"
 #include "sql/engine/expr/ob_eval_info.h"
 #include <glob.h>
 
@@ -47,7 +47,7 @@ int ObFileSQLUtils::check_file_access_with_session(ObIAllocator &allocator,
                                                     const ObEvalCtx &ctx)
 {
   ObString secure_file_priv;
-  ObSQLSessionInfo *session = ctx.exec_ctx_.get_my_session();
+  ObBasicSessionInfo *session = ctx.exec_ctx_.get_my_session();
   if (OB_NOT_NULL(session)) {
     session->get_secure_file_priv(secure_file_priv);
   }

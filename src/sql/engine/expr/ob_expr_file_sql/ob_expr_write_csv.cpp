@@ -77,7 +77,7 @@ static int write_json_to_csv(ObIAllocator &allocator,
 
   // Open output file
   ObFileAppender file_appender;
-  if (OB_FAIL(file_appender.open(file_path, false /*dio*/, true /*is_create*/, true /*is_trunc*/))) {
+  if (OB_FAIL(file_appender.open(file_path, true /*is_create*/, true /*is_trunc*/))) {
     LOG_WARN("failed to open output file", K(ret), K(file_path));
     return ret;
   }
