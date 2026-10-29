@@ -40,6 +40,28 @@ namespace oceanbase
 {
 namespace storage
 {
+namespace
+{
+// Keep the IK parser and its dictionaries on the calling thread.  The parser
+// still owns a fresh TokenizeContext per document, but dictionary loading and
+// segmenter construction no longer sit on the per-row TOKENIZE hot path.
+struct IKParserThreadCache
+{
+  common::ObArenaAllocator allocator;
+  ObIKFTParser *parser = nullptr;
+
+  ~IKParserThreadCache()
+  {
+    if (OB_NOT_NULL(parser)) {
+      OB_DELETEx(ObIKFTParser, &allocator, parser);
+      parser = nullptr;
+    }
+  }
+};
+
+thread_local IKParserThreadCache g_ik_parser_cache;
+} // namespace
+
 int ObIKFTParser::init(const ObFTParserParam &param)
 {
   int ret = OB_SUCCESS;
@@ -64,6 +86,29 @@ int ObIKFTParser::init(const ObFTParserParam &param)
     }
   }
 
+  return ret;
+}
+
+int ObIKFTParser::reinit(const ObFTParserParam &param)
+{
+  int ret = OB_SUCCESS;
+  ObCollationType coll_type = ObCollationType::CS_TYPE_INVALID;
+
+  if (OB_ISNULL(param.cs_) || OB_ISNULL(param.cs_->name)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (CS_TYPE_INVALID == (coll_type = ObCharset::collation_type(param.cs_->name))) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (!is_inited_ || coll_type != coll_type_) {
+    reset();
+    ret = init(param);
+  } else {
+    if (OB_NOT_NULL(ctx_)) {
+      ctx_->~TokenizeContext();
+      allocator_.free(ctx_);
+      ctx_ = nullptr;
+    }
+    ret = init_ctx(param);
+  }
   return ret;
 }
 
@@ -193,20 +238,32 @@ int ObIKFTParser::process_next_batch()
 int ObIKFTParserDesc::segment(ObFTParserParam *param, ObITokenIterator *&iter) const
 {
   int ret = OB_SUCCESS;
-  ObIKFTParser *parser = nullptr;
   ObFTDictHub *hub = nullptr;
   if (OB_ISNULL(param) || OB_UNLIKELY(!param->is_valid())) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(ObFTParseData::instance().get_dict_hub(hub))) {
-  } else if (OB_ISNULL(parser = OB_NEWx(ObIKFTParser, param->allocator_, *(param->allocator_), hub))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else if (OB_FAIL(parser->init(*param))) {
   } else {
-    iter = parser;
-  }
-
-  if (OB_FAIL(ret)) {
-    OB_DELETEx(ObIKFTParser, param->allocator_, parser);
+    ObIKFTParser *parser = g_ik_parser_cache.parser;
+    if (OB_ISNULL(parser)) {
+      parser = OB_NEWx(ObIKFTParser,
+                       &g_ik_parser_cache.allocator,
+                       g_ik_parser_cache.allocator,
+                       hub);
+      if (OB_ISNULL(parser)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else if (OB_FAIL(parser->init(*param))) {
+        OB_DELETEx(ObIKFTParser, &g_ik_parser_cache.allocator, parser);
+        parser = nullptr;
+      } else {
+        g_ik_parser_cache.parser = parser;
+        iter = parser;
+      }
+    } else if (OB_FAIL(parser->reinit(*param))) {
+      OB_DELETEx(ObIKFTParser, &g_ik_parser_cache.allocator, parser);
+      g_ik_parser_cache.parser = nullptr;
+    } else {
+      iter = parser;
+    }
   }
 
   return ret;
@@ -215,8 +272,9 @@ int ObIKFTParserDesc::segment(ObFTParserParam *param, ObITokenIterator *&iter) c
 void ObIKFTParserDesc::free_token_iter(ObFTParserParam *param,
                                        ObITokenIterator *&iter) const
 {
-  iter->~ObITokenIterator();
-  param->allocator_->free(iter);
+  // The iterator is owned by the per-thread cache and stays alive for reuse.
+  (void)param;
+  iter = nullptr;
 }
 
 

@@ -54,6 +54,8 @@ public:
 
   int init(const ObFTParserParam &param);
 
+  int reinit(const ObFTParserParam &param);
+
   int get_next_token(const char *&word,
                      int64_t &word_len,
                      int64_t &char_cnt,
