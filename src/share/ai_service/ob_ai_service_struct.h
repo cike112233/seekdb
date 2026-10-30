@@ -48,6 +48,7 @@ public:
     parameters_.reset();
     request_transform_fn_.reset();
     response_transform_fn_.reset();
+    max_concurrency_ = 0; // 0 means the user did not specify it
     endpoint_id_ = OB_INVALID_ID;
   }
 
@@ -67,8 +68,15 @@ public:
   const ObString &get_parameters() const { return parameters_; }
   const ObString &get_request_transform_fn() const { return request_transform_fn_; }
   const ObString &get_response_transform_fn() const { return response_transform_fn_; }
+  // 0 means the endpoint does not limit the concurrency explicitly.
+  int64_t get_max_concurrency() const { return max_concurrency_; }
   uint64_t get_endpoint_id() const { return endpoint_id_; }
   void set_endpoint_id(uint64_t endpoint_id) { endpoint_id_ = endpoint_id; }
+
+  static bool is_auth_key_optional_provider(const ObString &provider);
+
+  static const int64_t MAX_CONCURRENCY_LOWER_BOUND = 1;
+  static const int64_t MAX_CONCURRENCY_UPPER_BOUND = 1024;
 
   TO_STRING_KV(K_(name),
                K_(scope),
@@ -80,7 +88,8 @@ public:
                K_(request_model_name),
                K_(parameters),
                K_(request_transform_fn),
-               K_(response_transform_fn));
+               K_(response_transform_fn),
+               K_(max_concurrency));
 private:
   static const ObString DEFAULT_SCOPE;
   static bool is_valid_provider(const ObString &provider);
@@ -98,6 +107,7 @@ private:
   ObString parameters_;
   ObString request_transform_fn_;
   ObString response_transform_fn_;
+  int64_t max_concurrency_;
 };
 
 } // namespace share

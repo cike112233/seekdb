@@ -37,11 +37,37 @@ const char *VALID_PROVIDERS[] = {
   "SILICONFLOW",
   "COHERE",
   "HUNYUAN-OPENAI",
-  "OPENAI"
+  "OPENAI",
+  "OLLAMA"
+};
+
+// Providers that talk to a local/self-hosted service do not need an API key,
+// so an empty access_key is accepted for them.
+const char *AUTH_KEY_OPTIONAL_PROVIDERS[] = {
+  "OLLAMA"
 };
 
 #define EXTRACT_JSON_ELEM_STR(json_key, member) \
   EXTRACT_JSON_ELEM_STR_WITH_PROCESS(json_key, member, "void")
+
+#define EXTRACT_JSON_ELEM_INT(json_key, member, lower_bound, upper_bound) \
+      if (elem.first.case_compare(json_key) == 0) { \
+        if (ObJsonNodeType::J_INT != elem.second->json_type() \
+            && ObJsonNodeType::J_UINT != elem.second->json_type()) { \
+          ret = OB_AI_FUNC_PARAM_VALUE_INVALID; \
+          LOG_USER_ERROR(OB_AI_FUNC_PARAM_VALUE_INVALID, elem.first.length(), elem.first.ptr()); \
+          LOG_WARN("invalid json type for int param", K(ret), K(elem.first), K(elem.second->json_type())); \
+        } else { \
+          const int64_t int_value = elem.second->get_int(); \
+          if (int_value < (lower_bound) || int_value > (upper_bound)) { \
+            ret = OB_AI_FUNC_PARAM_VALUE_INVALID; \
+            LOG_USER_ERROR(OB_AI_FUNC_PARAM_VALUE_INVALID, elem.first.length(), elem.first.ptr()); \
+            LOG_WARN("int param out of range", K(ret), K(elem.first), K(int_value)); \
+          } else { \
+            member = int_value; \
+          } \
+        } \
+      } else
 
 #define EXTRACT_JSON_ELEM_STR_WITH_PROCESS(json_key, member, post_process) \
       if (elem.first.case_compare(json_key) == 0) { \
@@ -80,6 +106,7 @@ int ObAiModelEndpointInfo::deep_copy(
   int ret = OB_SUCCESS;
   reset();
   endpoint_id_ = other.endpoint_id_;
+  max_concurrency_ = other.max_concurrency_;
   if (OB_FAIL(ob_write_string(allocator, other.name_, name_))) {
   } else if (OB_FAIL(ob_write_string(allocator, other.scope_, scope_))) {
   } else if (OB_FAIL(ob_write_string(allocator, other.ai_model_name_, ai_model_name_))) {
@@ -112,7 +139,7 @@ int ObAiModelEndpointInfo::check_valid() const
   } else if (url_.empty()) {
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("url"), "url");
-  } else if (access_key_.empty()) {
+  } else if (access_key_.empty() && !is_auth_key_optional_provider(provider_)) {
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("access_key"), "access_key");
     LOG_WARN("access_key is empty", K(ret), K(*this));
@@ -147,6 +174,18 @@ bool ObAiModelEndpointInfo::is_valid_provider(const ObString &provider)
   return is_valid;
 }
 
+bool ObAiModelEndpointInfo::is_auth_key_optional_provider(const ObString &provider)
+{
+  bool is_optional = false;
+  for (int i = 0; i < ARRAYSIZEOF(AUTH_KEY_OPTIONAL_PROVIDERS); i++) {
+    if (provider.case_compare(AUTH_KEY_OPTIONAL_PROVIDERS[i]) == 0) {
+      is_optional = true;
+      break;
+    }
+  }
+  return is_optional;
+}
+
 int ObAiModelEndpointInfo::merge_delta_endpoint(common::ObArenaAllocator &allocator, const ObIJsonBase &delta_jbase)
 {
   int ret = OB_SUCCESS;
@@ -165,6 +204,8 @@ int ObAiModelEndpointInfo::merge_delta_endpoint(common::ObArenaAllocator &alloca
       EXTRACT_JSON_ELEM_STR("parameters", parameters_)
       EXTRACT_JSON_ELEM_STR("request_transform_fn", request_transform_fn_)
       EXTRACT_JSON_ELEM_STR("response_transform_fn", response_transform_fn_)
+      EXTRACT_JSON_ELEM_INT("max_concurrency", max_concurrency_,
+                            MAX_CONCURRENCY_LOWER_BOUND, MAX_CONCURRENCY_UPPER_BOUND)
       EXTRACT_JSON_ELEM_END()
     }
     iter.next();
