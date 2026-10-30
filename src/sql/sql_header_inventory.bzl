@@ -1279,4 +1279,10 @@ SQL_PRIVATE_HEADERS = [
     "tablelock/ob_lock_executor.h",
     "tablelock/ob_lock_func_executor.h",
     "tablelock/ob_mysql_lock_table_executor.h",
+    "engine/expr/ob_expr_file_sql/ob_expr_glob.h",
+    "engine/expr/ob_expr_file_sql/ob_expr_read_csv.h",
+    "engine/expr/ob_expr_file_sql/ob_expr_read_json.h",
+    "engine/expr/ob_expr_file_sql/ob_expr_read_parquet.h",
+    "engine/expr/ob_expr_file_sql/ob_expr_write_csv.h",
+    "engine/expr/ob_expr_file_sql/ob_file_sql_utils.h",
 ]
